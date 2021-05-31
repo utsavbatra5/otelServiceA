@@ -19,22 +19,15 @@ const (
 	applicationName  = "ServiceA"
 )
 
-func requestHandler(w http.ResponseWriter, r *http.Request, postURL string, tracing tracer.Tracing) {
-	traceID, spanID, ok := tracer.ExtractTraceInfo(r.Context())
+func requestHandler(w http.ResponseWriter, r *http.Request, postURL string, client *http.Client) {
+	traceID, spanID, _ := tracer.ExtractTraceInfo(r.Context())
 
-	if ok {
-		log.Println("Trace ID for this request in", applicationName, " is:", traceID, " and Span ID is:", spanID)
+	log.Println(fmt.Sprintf("Trace ID for this request in %s is: %s and Span Id is: %s", applicationName, traceID, spanID))
+
+	req, err := http.NewRequestWithContext(r.Context(), "POST", postURL, nil)
+	if err != nil {
+		log.Printf("Error on request", err)
 	}
-
-	tr := otelhttp.NewTransport(http.DefaultTransport,
-		otelhttp.WithPropagators(tracing.Propagator),
-		otelhttp.WithTracerProvider(tracing.TracerProvider),
-	)
-
-	client := &http.Client{Transport: tr}
-
-	req, err :=
-		http.NewRequestWithContext(r.Context(), "POST", postURL, nil)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -65,7 +58,6 @@ func getViper() *viper.Viper {
 
 func initTracing(v *viper.Viper, appName string) (tracer.Tracing, error) {
 	var tracing = tracer.Tracing{
-		Enabled:        false,
 		Propagator:     propagation.TraceContext{},
 		TracerProvider: trace.NewNoopTracerProvider(),
 	}
@@ -79,9 +71,7 @@ func initTracing(v *viper.Viper, appName string) (tracer.Tracing, error) {
 	if err != nil {
 		return tracer.Tracing{}, err
 	}
-	if len(traceConfig.Provider) != 0 && traceConfig.Provider != tracer.DefaultTracerProvider {
-		tracing.Enabled = true
-	}
+
 	tracing.TracerProvider = tracerProvider
 	return tracing, nil
 }
@@ -96,17 +86,24 @@ func main() {
 		return
 	}
 
-	log.Println("tracing status enabled", tracing.Enabled)
-
 	r := mux.NewRouter()
 
+	// Auto instrumentation options of mux router.
 	otelMuxOptions := []otelmux.Option{
 		otelmux.WithPropagators(tracing.Propagator),
 		otelmux.WithTracerProvider(tracing.TracerProvider),
 	}
 
+	// Auto instrumentation of http client.
+	tr := otelhttp.NewTransport(http.DefaultTransport,
+		otelhttp.WithPropagators(tracing.Propagator),
+		otelhttp.WithTracerProvider(tracing.TracerProvider),
+	)
+
+	client := &http.Client{Transport: tr}
+
 	requestHandlerFunc := func(w http.ResponseWriter, r *http.Request) {
-		requestHandler(w, r, viper.GetString("postURL"), tracing)
+		requestHandler(w, r, viper.GetString("postURL"), client)
 	}
 
 	r.Use(otelmux.Middleware("ServiceA", otelMuxOptions...), tracer.EchoFirstTraceNodeInfo(tracing.Propagator))

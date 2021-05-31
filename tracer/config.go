@@ -36,9 +36,6 @@ type TraceConfig struct {
 // Tracing contains the core dependencies to make tracing possible across an
 // application.
 type Tracing struct {
-	// Enabled should be set to false if the tracerProvider is a noop which
-	// essentially disables tracing in the system.
-	Enabled bool
 
 	// TracerProvider helps create trace spans.
 	TracerProvider trace.TracerProvider
